@@ -5,10 +5,6 @@
 // tuples, and forwards them to STHIDEventGenerator as a single
 // sendEventStream: call (true simultaneous multi-touch, not faked
 // sequential taps).
-//
-// Keeps an internal table of "currently down" touch IDs so that
-// stationary touches (joystick held) can be re-asserted on every frame
-// alongside new ones (skill taps) without losing each other.
 
 #import "MultiTouchExt.h"
 #import "STHIDEventGenerator.h"
@@ -19,20 +15,6 @@
 
 #include <stdint.h>
 #include <string.h>
-
-// We keep the per-client touch state in a global map keyed by rfbClientPtr.
-// libvncserver invokes our handler from the client read loop on its own
-// thread, so guard with a lock.
-static NSMutableDictionary<NSValue *, NSMutableDictionary *> *g_clientTouches = nil;
-static NSLock *g_lock = nil;
-
-static void ensureState(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        g_clientTouches = [NSMutableDictionary new];
-        g_lock = [NSLock new];
-    });
-}
 
 static NSString *phaseString(uint8_t p) {
     switch (p) {
@@ -45,17 +27,33 @@ static NSString *phaseString(uint8_t p) {
     }
 }
 
-// Forward a parsed touch frame to the HID generator using its public
-// dictionary-based API. The dictionary mirrors what
-// STHIDEventGenerator expects per its own internal sendEventStream:
-// implementation.
+// STHIDEventGenerator's sendEventStream: expects:
+//
+//   {
+//     "events": [
+//       {
+//         "timeOffset": 0.0,
+//         "inputType": "finger",
+//         "touches": [
+//           { "id": N, "phase": "began|moved|ended|stationary", "x": F, "y": F },
+//           ...
+//         ]
+//       }
+//     ]
+//   }
+//
+// We construct that here and dispatch as a single stream entry per frame.
 static void dispatchTouchesToHID(NSArray<NSDictionary *> *touches) {
     if (touches.count == 0) return;
     NSDictionary *event = @{
-        HIDEventInputType: @"finger",
+        @"timeOffset":      @(0.0),
+        HIDEventInputType:  @"finger",
         HIDEventTouchesKey: touches,
     };
-    [[STHIDEventGenerator sharedHIDEventGenerator] sendEventStream:event];
+    NSDictionary *stream = @{
+        @"events": @[event],
+    };
+    [[STHIDEventGenerator sharedGenerator] sendEventStream:stream];
 }
 
 static rfbBool ControlProHandleMessage(rfbClientPtr cl,
@@ -106,23 +104,38 @@ static rfbBool ControlProHandleMessage(rfbClientPtr cl,
     return TRUE;
 }
 
-static rfbBool ControlProClientHook(rfbClientPtr cl) {
+// libvncserver requires newClient to be non-NULL for the extension to be
+// activated for incoming clients. We accept all clients unconditionally.
+static rfbBool ControlProNewClient(rfbClientPtr cl, void **data) {
     (void)cl;
-    return TRUE; // accept all clients
+    *data = NULL;
+    rfbLog("ControlPro: multi-touch extension activated for client\n");
+    return TRUE;
 }
 
+// libvncserver rfbProtocolExtension struct (libvncserver 0.9.x):
+//   1. newClient            rfbBool fn — MUST be non-NULL to activate per-client
+//   2. init                 rfbBool fn or NULL
+//   3. pseudoEncodings      int* (NULL-terminated list) or NULL
+//   4. enablePseudoEncoding rfbBool fn or NULL
+//   5. handleMessage        rfbBool fn or NULL
+//   6. close                void fn or NULL
+//   7. usage                void fn or NULL
+//   8. processArgument      int fn or NULL
+//   9. next                 (set by registry, init NULL)
 static rfbProtocolExtension ControlProExt = {
-    /* newClient        */ NULL,
-    /* close            */ NULL,
-    /* clientHook       */ ControlProClientHook,
-    /* pseudoEncodings  */ NULL,
-    /* handleMessage    */ ControlProHandleMessage,
-    /* encodingEnabled  */ NULL,
-    /* next             */ NULL,
+    ControlProNewClient,         // newClient (NULL = "always deactivated")
+    NULL,                        // init
+    NULL,                        // pseudoEncodings
+    NULL,                        // enablePseudoEncoding
+    ControlProHandleMessage,     // handleMessage
+    NULL,                        // close
+    NULL,                        // usage
+    NULL,                        // processArgument
+    NULL,                        // next
 };
 
 void ControlProRegisterMultiTouchExtension(void) {
-    ensureState();
     rfbRegisterProtocolExtension(&ControlProExt);
     rfbLog("ControlPro: multi-touch RFB extension registered (msg=0x%02X, max %d touches)\n",
            CONTROLPRO_MSG_MULTITOUCH, CONTROLPRO_MAX_TOUCHES);
