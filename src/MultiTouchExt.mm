@@ -100,6 +100,7 @@ static rfbBool ControlProHandleMessage(rfbClientPtr cl,
         }];
     }
 
+    NSLog(@"[ControlPro] multi-touch frame: %u touches", (unsigned)n);
     dispatchTouchesToHID(frame);
     return TRUE;
 }
@@ -109,6 +110,7 @@ static rfbBool ControlProHandleMessage(rfbClientPtr cl,
 static rfbBool ControlProNewClient(rfbClientPtr cl, void **data) {
     (void)cl;
     *data = NULL;
+    NSLog(@"[ControlPro] multi-touch extension activated for client");
     rfbLog("ControlPro: multi-touch extension activated for client\n");
     return TRUE;
 }
@@ -137,6 +139,9 @@ static rfbProtocolExtension ControlProExt = {
 
 void ControlProRegisterMultiTouchExtension(void) {
     rfbRegisterProtocolExtension(&ControlProExt);
+    // Log via BOTH NSLog (guaranteed to hit syslog) and rfbLog (libvncserver path).
+    NSLog(@"[ControlPro] multi-touch RFB extension registered (msg=0x%02X, max %d touches)",
+          CONTROLPRO_MSG_MULTITOUCH, CONTROLPRO_MAX_TOUCHES);
     rfbLog("ControlPro: multi-touch RFB extension registered (msg=0x%02X, max %d touches)\n",
            CONTROLPRO_MSG_MULTITOUCH, CONTROLPRO_MAX_TOUCHES);
 }
