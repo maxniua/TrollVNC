@@ -43,6 +43,7 @@
 #import <vector>
 
 #import "BulletinManager.h"
+#import "MultiTouchExt.h"
 #import "ClipboardManager.h"
 #import "Control.h"
 #import "FBSOrientationObserver.h"
@@ -65,7 +66,7 @@
 int gOrientationFixQuad = 0; // 0=0°, 1=90°CW, 2=180°, 3=270°CW
 
 static BOOL gEnabled = YES;
-static int gPort = 5901;
+static int gPort = 5911;
 static int gTvCtlPort = 0;        // port for control connections (0 = disabled)
 static NSString *gBindHost = nil; // optional bind address from CLI/config
 static NSString *gDesktopName = @"TrollVNC";
@@ -498,9 +499,9 @@ static void parseDaemonOptions(void) {
     if ([portN isKindOfClass:[NSNumber class]] || [portN isKindOfClass:[NSString class]]) {
         int v = portN.intValue;
         if (v < 1024 || v > 65535) {
-            // Privileged or invalid -> fallback to default 5901
-            TVLog(@"-daemon: invalid TCP Port=%d; using default 5901", v);
-            gPort = 5901;
+            // Privileged or invalid -> fallback to default 5911
+            TVLog(@"-daemon: invalid TCP Port=%d; using default 5911", v);
+            gPort = 5911;
         } else {
             gPort = v;
         }
@@ -4600,6 +4601,7 @@ static void setupRfbScreen(int argc, const char *argv[]) {
 
 static void setupRfbEventHandlers(void) {
     gScreen->ptrAddEvent = ptrAddEvent;
+    ControlProRegisterMultiTouchExtension();
     gScreen->kbdAddEvent = kbdAddEvent;
     gScreen->kbdReleaseAllKeys = kbdReleaseAllKeys;
 }
