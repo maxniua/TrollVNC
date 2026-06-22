@@ -37,6 +37,7 @@
 #import <rfb/keysym.h>
 #import <rfb/rfb.h>
 #import <string>
+#import <dlfcn.h>
 #import <sys/socket.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -74,7 +75,7 @@ static double gKeepAliveSec = 0.0; // 15..86400
 static BOOL gClipboardEnabled = YES;
 static BOOL gIsDaemonMode = NO; // set when launched with -daemon
 
-static double gScale = 1.0; // 0 < scale <= 1.0, 1.0 = no scaling
+static double gScale = 0.6; // 0 < scale <= 1.0 (ControlPro farm default: trade fidelity for bandwidth/concurrency; override via Scale pref or -s)
 // Preferred frame rate range (0 = unspecified)
 static int gFpsMin = 0;
 static int gFpsPref = 0;
@@ -130,9 +131,13 @@ static char *gRepeaterHost = NULL;
 static int gRepeaterPort = 5500;
 static int gRepeaterId = 12345679;
 
-// User notifications
-static BOOL gUserClientNotifsEnabled = YES;
-static BOOL gUserSingleNotifsEnabled = YES;
+// User notifications — default OFF for the ControlPro control farm: the PC
+// client opens/closes connections constantly (grid tiles + the zoom window's
+// own connection), which otherwise spams "client connected/disconnected" and
+// "N active clients" banners on every phone. Re-enable per device via the
+// ClientNotifsEnabled / SingleNotifEnabled prefs if you actually want them.
+static BOOL gUserClientNotifsEnabled = NO;
+static BOOL gUserSingleNotifsEnabled = NO;
 
 // Blocked hosts (temporary blacklist)
 static NSMutableSet<NSString *> *gBlockedHosts = nil;
@@ -3366,6 +3371,35 @@ static NSString *tvBonjourServiceName(NSString *baseName) {
 
 static TVBonjourDelegate *gBonjourDelegate = nil;
 
+// Read a string value from libMobileGestalt via dlopen — no link-time
+// dependency, no SPI header. Used to advertise the device's hardware "设备码"
+// so the ControlPro PC client can bind the SAME device number whether it's
+// reached over USB (UDID/serial from ideviceinfo) or WiFi (this TXT record).
+// Returns nil if the key is unavailable/protected; the client then falls back
+// to its USB-learned hostname→UDID map, so this degrades gracefully.
+static NSString *tvMobileGestaltString(const char *key) {
+    static void *handle = NULL;
+    static CFStringRef (*mgCopyAnswer)(CFStringRef) = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+        if (handle)
+            mgCopyAnswer = (CFStringRef(*)(CFStringRef))dlsym(handle, "MGCopyAnswer");
+    });
+    if (!mgCopyAnswer)
+        return nil;
+    CFStringRef cfKey = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
+    if (!cfKey)
+        return nil;
+    CFStringRef value = mgCopyAnswer(cfKey);
+    CFRelease(cfKey);
+    if (!value)
+        return nil;
+    NSString *result = (CFGetTypeID(value) == CFStringGetTypeID()) ? [(__bridge NSString *)value copy] : nil;
+    CFRelease(value);
+    return result.length > 0 ? result : nil;
+}
+
 static NSData *bonjourTXTRecord(void) {
     // Minimal helpful metadata for clients
     // Keys kept short; values ASCII per convention
@@ -3373,6 +3407,21 @@ static NSData *bonjourTXTRecord(void) {
     // Name
     if (gDesktopName.length > 0) {
         txt[@"vn"] = [gDesktopName dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    // Hardware "设备码" for cross-transport device identity (ControlPro). Cached
+    // (computed once) since these never change for the life of the device.
+    {
+        static NSString *sSerial = nil;
+        static NSString *sUdid = nil;
+        static dispatch_once_t idOnce;
+        dispatch_once(&idOnce, ^{
+            sSerial = tvMobileGestaltString("SerialNumber");
+            sUdid = tvMobileGestaltString("UniqueDeviceID");
+        });
+        if (sSerial.length > 0)
+            txt[@"serial"] = [sSerial dataUsingEncoding:NSUTF8StringEncoding];
+        if (sUdid.length > 0)
+            txt[@"udid"] = [sUdid dataUsingEncoding:NSUTF8StringEncoding];
     }
     // View-only flag
     txt[@"vo"] = [[NSString stringWithFormat:@"%d", gViewOnly ? 1 : 0] dataUsingEncoding:NSASCIIStringEncoding];
