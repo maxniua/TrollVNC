@@ -77,10 +77,14 @@ static BOOL gIsDaemonMode = NO; // set when launched with -daemon
 
 static double gScale = 0.6; // 0 < scale <= 1.0 (ControlPro farm default: trade fidelity for bandwidth/concurrency; override via Scale pref or -s)
 // Preferred frame rate range (0 = unspecified)
+// ControlPro farm default: cap capture at ~15fps. Unlimited (60fps) drives trollvncserver
+// to ~218 wakeups/s, past the iOS 150/s background quota -> the daemon gets killed
+// (bug_type 142 wakeups power report) and the PC client loses the stream. Override via
+// FrameRateSpec pref / -F. Applied only when any of these is > 0 (see ScreenCapturer wiring).
 static int gFpsMin = 0;
-static int gFpsPref = 0;
-static int gFpsMax = 0;
-static double gDeferWindowSec = 0.015;      // Coalescing window; 0 disables deferral
+static int gFpsPref = 15;
+static int gFpsMax = 15;
+static double gDeferWindowSec = 0.1;        // Coalescing window; 0 disables deferral (ControlPro farm default: coalesce flushes to ~10/s to cut wakeups; override via -d)
 static int gMaxInflightUpdates = 2;         // Max concurrent client encodes; drop frames if >= this
 static int gTileSize = 32;                  // Tile size for dirty detection (pixels)
 static int gFullscreenThresholdPercent = 0; // If changed tiles exceed this %, update full screen
