@@ -276,9 +276,12 @@ static CFIndex sDirtyFrameCount = 0;
         if (@available(iOS 15, *)) {
             if ([mDisplayLink respondsToSelector:@selector(setPreferredFrameRateRange:)]) {
                 CAFrameRateRange range;
-                range.minimum = (mMinFps > 0) ? mMinFps : 0.0;
                 range.maximum = (mMaxFps > 0) ? mMaxFps : 0.0;
                 range.preferred = (mPreferredFps > 0) ? mPreferredFps : 0.0;
+                // iOS 15 throws NSInvalidArgumentException ("invalid range") for a finite
+                // range whose minimum is 0; iOS 16+ tolerated it. Clamp minimum to
+                // preferred/maximum so the range is valid on every supported iOS.
+                range.minimum = (mMinFps > 0) ? mMinFps : (range.preferred > 0 ? range.preferred : range.maximum);
                 mDisplayLink.preferredFrameRateRange = range;
             } else {
                 NSInteger setFps = (mMaxFps > 0) ? mMaxFps : mPreferredFps;
@@ -343,9 +346,12 @@ static CFIndex sDirtyFrameCount = 0;
             if (@available(iOS 15, *)) {
                 if ([mDisplayLink respondsToSelector:@selector(setPreferredFrameRateRange:)]) {
                     CAFrameRateRange range;
-                    range.minimum = (mMinFps > 0) ? mMinFps : 0.0;
                     range.maximum = (mMaxFps > 0) ? mMaxFps : 0.0;
                     range.preferred = (mPreferredFps > 0) ? mPreferredFps : 0.0;
+                    // iOS 15 throws NSInvalidArgumentException ("invalid range") for a finite
+                    // range whose minimum is 0; iOS 16+ tolerated it. Clamp minimum to
+                    // preferred/maximum so the range is valid on every supported iOS.
+                    range.minimum = (mMinFps > 0) ? mMinFps : (range.preferred > 0 ? range.preferred : range.maximum);
                     mDisplayLink.preferredFrameRateRange = range;
                 } else {
                     NSInteger setFps = (mMaxFps > 0) ? mMaxFps : mPreferredFps;
